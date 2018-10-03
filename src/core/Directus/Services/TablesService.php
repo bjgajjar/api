@@ -1131,13 +1131,15 @@ class TablesService extends AbstractService
         $this->validatePayload('directus_fields', $fields, $data, $params);
 
         $type = ArrayUtils::get($data, 'type');
-        if ($type && !DataTypes::isAliasType($type) && !ArrayUtils::has($data, 'datatype')) {
+        $dataType = ArrayUtils::get($data, 'datatype');
+        if ($type && !DataTypes::isAliasType($type) && !$dataType) {
             throw new UnprocessableEntityException(
                 'datatype is required'
             );
         }
 
-        if ($type && DataTypes::isLengthType($type) && !ArrayUtils::get($data, 'length')) {
+        $length = ArrayUtils::get($data, 'length');
+        if ($dataType && $this->getSchemaManager()->isTypeLengthRequired($dataType) && !$length) {
             $fieldName = ArrayUtils::get($data, 'field');
             $message = 'Missing length';
 
@@ -1145,7 +1147,20 @@ class TablesService extends AbstractService
                 $message .= ' for: ' . $fieldName;
             }
 
+            // TODO: Create an exception class for length required
             throw new UnprocessableEntityException($message);
+        }
+
+        // on update
+        $collection = $this->getSchemaManager()->getCollection(ArrayUtils::get($data, 'collection'))
+
+        if ($length && !$this->getSchemaManager()->canTypeUseLength($dataType)) {
+            $fieldName = ArrayUtils::get($data, 'field');
+
+            // TODO: Create an exception class for length is not supported
+            throw new UnprocessableEntityException(
+                sprintf('field "%s" does not support length', $fieldName)
+            );
         }
 
         if ($type && !DataTypes::exists($type)) {
