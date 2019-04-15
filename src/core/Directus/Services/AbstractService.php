@@ -116,7 +116,6 @@ abstract class AbstractService
     public function validate(array $data, array $constraints)
     {
         $constraintViolations = $this->getViolations($data, $constraints);
-
         $this->throwErrorIfAny($constraintViolations);
     }
 
@@ -145,16 +144,56 @@ abstract class AbstractService
     protected function getViolations(array $data, array $constraints)
     {
         $violations = [];
-
         foreach ($constraints as $field => $constraint) {
             if (is_string($constraint)) {
                 $constraint = explode('|', $constraint);
+            }else{
+                foreach($constraint as $childKey => $childValue){
+                    if(is_array($childValue)){
+                        unset($constraint[$childKey]);
+                    }
+                }
             }
-
             $violations[$field] = $this->validator->validate(ArrayUtils::get($data, $field), $constraint);
         }
-
+        
+        foreach ($constraints as $field => $constraint) {
+            foreach($constraint as $childKey => $childValue){
+                if(is_array($childValue) && isset($violations[$field]) && count($violations[$field]) == 0){
+                    $validationObj = [];
+                    foreach($data[$field] as $key => $value){
+                        $validationObj[$key] = $this->getViolations($value,$childValue);
+                    }
+                    $violations[$field] = $validationObj;
+                }
+            }
+        }
+        
         return $violations;
+    }
+
+    protected function fetchError($violations,$parentField = null, $keyValue = null)
+    {   
+        foreach ($violations as $field => $violation) {
+            if (is_array($violation)) {
+                foreach($violation as $key => $value){
+                    $results[] = $this->fetchError($value,$field,$key);
+                }
+            }else{
+                $iterator = $violation->getIterator();
+                $errors = [];
+                while ($iterator->valid()) {
+                    $constraintViolation = $iterator->current();
+                    $errors[] = $constraintViolation->getMessage();
+                    $iterator->next();
+                }
+                if ($errors) {
+                    $val = $parentField != null ? $parentField.".".$keyValue.".".$field : $field;
+                    $results[] = sprintf('%s: %s', $val , implode(' ', $errors));
+                }
+            }
+        }
+        return $results;
     }
 
     /**
@@ -167,51 +206,31 @@ abstract class AbstractService
     protected function throwErrorIfAny(array $violations)
     {
         $results = [];
-
         /** @var ConstraintViolationList $violation */
-        foreach ($violations as $field => $violation) {
-            $iterator = $violation->getIterator();
-
-            $errors = [];
-            while ($iterator->valid()) {
-                $constraintViolation = $iterator->current();
-                $errors[] = $constraintViolation->getMessage();
-                $iterator->next();
-            }
-
-            if ($errors) {
-                $results[] = sprintf('%s: %s', $field, implode(' ', $errors));
-            }
-        }
-
+        $results =  $this->fetchError($violations);
+            
         if (count($results) > 0) {
-            throw new InvalidRequestException(implode(' ', $results));
+            $finalResult = array();
+            foreach($results as $key=>$val) {
+                $finalResult = is_array($val) ? array_merge($finalResult,$val) : array_merge($finalResult,array($val));
+            }
+            throw new InvalidRequestException(implode(' ', $finalResult));
         }
     }
 
+
     /**
-     * Creates the constraint for a an specific table columns
+     * Check the constraints of fields
      *
-     * @param string $collectionName
-     * @param array $fields List of columns name
-     *
-     * @return array
      */
-    protected function createConstraintFor($collectionName, array $fields = [])
+    protected function getFieldConstraints($collectionName, $fields)
     {
-        /** @var SchemaManager $schemaManager */
         $schemaManager = $this->container->get('schema_manager');
         $collectionObject = $schemaManager->getCollection($collectionName);
 
         $constraints = [];
-
-        if ($fields === null) {
-            return $constraints;
-        }
-
         foreach ($collectionObject->getFields($fields) as $field) {
             $columnConstraints = [];
-
             if ($field->hasAutoIncrement()) {
                 continue;
             }
@@ -238,19 +257,35 @@ abstract class AbstractService
                 $columnConstraints[] = 'time';
             } else if (DataTypes::isDateTimeType($field->getType())) {
                 $columnConstraints[] = 'datetime';
+            } else if (DataTypes::isO2MType($field->getType())) {
+                $columnConstraints[] = $this->getFieldConstraints($field->getRelationship()->getCollectionMany(),[]);
             }
-            // TODO: Relational accept its type, null (if allowed) and a object
-            // else if ($schemaManager->isNumericType($field->getType())) {
-            //     $columnConstraints[] = 'numeric';
-            // } else if ($schemaManager->isStringType($field->getType())) {
-            //     $columnConstraints[] = 'string';
-            // }
-
+           
             if (!empty($columnConstraints)) {
                 $constraints[$field->getName()] = $columnConstraints;
             }
         }
+        return $constraints;
+    }
 
+    /**
+     * Creates the constraint for a an specific table columns
+     *
+     * @param string $collectionName
+     * @param array $fields List of columns name
+     *
+     * @return array
+     */
+    protected function createConstraintFor($collectionName, array $fields = [])
+    {
+        /** @var SchemaManager $schemaManager */
+        $constraints = [];
+
+        if ($fields === null) {
+            return $constraints;
+        }
+
+        $constraints =  $this->getFieldConstraints($collectionName, $fields);
         return $constraints;
     }
 
