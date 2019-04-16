@@ -306,19 +306,26 @@ class TablesService extends AbstractService
 
         $data['collection'] = $name;
 
+        /**
+         * directus_fields have validation of required collection. From the frontend we are not getting this parameter.
+         * So we need to pass it from here although it is set at the create time in the "addFieldInfo" function.
+         */
+        foreach($data['fields'] as $key => $value){
+            $data['fields'][$key]['collection'] = $name;
+        }
         $this->validateCollectionPayload($name, $data, null, $params);
 
         $collection = null;
 
         try {
             $collection = $this->getSchemaManager()->getCollection($name);
+
         } catch (CollectionNotFoundException $e) {
             // TODO: Default to primary key id
             $constraints['fields'][] = 'required';
 
             $this->validate($data, array_merge(['fields' => 'array'], $constraints));
         }
-
         // ----------------------------------------------------------------------------
 
         if ($collection && $collection->isManaged()) {

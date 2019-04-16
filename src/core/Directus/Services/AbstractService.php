@@ -177,7 +177,10 @@ abstract class AbstractService
         foreach ($violations as $field => $violation) {
             if (is_array($violation)) {
                 foreach($violation as $key => $value){
-                    $results[] = $this->fetchError($value,$field,$key);
+                    $resultObject = $this->fetchError($value,$field,$key);
+                    if($resultObject){
+                        $results[] = $resultObject;
+                    }
                 }
             }else{
                 $iterator = $violation->getIterator();
@@ -188,6 +191,7 @@ abstract class AbstractService
                     $iterator->next();
                 }
                 if ($errors) {
+                    $this->container->get('logger')->info("Errors");
                     $val = $parentField != null ? $parentField.".".$keyValue.".".$field : $field;
                     $results[] = sprintf('%s: %s', $val , implode(' ', $errors));
                 }
@@ -412,7 +416,7 @@ abstract class AbstractService
         // TODO: Ideally this should be part of the validator constraints
         // we need to accept options for the constraint builder
         $this->validatePayloadWithFieldsValidation($collectionName, $payload);
-
+        
         $this->validate($payload, $this->createConstraintFor($collectionName, $columnsToValidate));
     }
 
